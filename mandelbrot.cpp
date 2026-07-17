@@ -7,14 +7,15 @@
 #include <iostream>
 #include <fstream>
 #include <string>
+#include <vector>
 
 /// @brief Configuration object for rendering a single Mandelbrot frame
 struct Config
 {
-    double start_real{-2.5};       ///< Range start on the real axis
-    double end_real{1.0};          ///< Range end on the real axis
-    double start_imaginary{-1.75}; ///< Range start on the imaginary axis
-    double end_imaginary{1.75};    ///< Range end on the imaginary axis
+    double real_lower{-2.5};       ///< Range start on the real axis
+    double real_upper{1.0};        ///< Range end on the real axis
+    double imaginary_lower{-1.75}; ///< Range start on the imaginary axis
+    double imaginary_upper{1.75};  ///< Range end on the imaginary axis
     std::uint16_t image_width{1600};
     std::uint16_t image_height{1600};
     std::uint16_t iteration_count{1000};
@@ -25,10 +26,10 @@ int main(int argc, char **argv)
     Config config{};
 
     CLI::App app{"Simple Mandelbrot fractal generator"};
-    app.add_option("--start_real", config.start_real, "Range start on the real axis");
-    app.add_option("--end_real", config.end_real, "Range end on the real axis");
-    app.add_option("--start_imaginary", config.start_imaginary, "Range start on the imaginary axis");
-    app.add_option("--end_imaginary", config.end_imaginary, "Range end on the imaginary axis");
+    app.add_option("--real_lower", config.real_lower, "Range start on the real axis");
+    app.add_option("--real_upper", config.real_upper, "Range end on the real axis");
+    app.add_option("--imaginary_lower", config.imaginary_lower, "Range start on the imaginary axis");
+    app.add_option("--imaginary_upper", config.imaginary_upper, "Range end on the imaginary axis");
     app.add_option("--image_width", config.image_width, "Image width");
     app.add_option("--image_height", config.image_height, "Image height");
     app.add_option("--iteration_count", config.iteration_count, "Iteration_count");
@@ -36,28 +37,34 @@ int main(int argc, char **argv)
     CLI11_PARSE(app, argc, argv);
 
     const auto file_name{"./mandelbrot.ppm"};
-    auto image_file = std::ofstream{file_name};
+    auto image_file = std::ofstream{file_name, std::ios::binary};
     if (!image_file.is_open())
     {
         std::cerr << " Error " << file_name << " could not be opened; exiting.\n";
         return 1;
     }
 
-    image_file << "P3\n"
-               << std::to_string(config.image_width) << " " << std::to_string(config.image_height) << "\n255\n";
+    // Create binary image file
+    image_file << "P6\n"
+               << config.image_width << "\n"
+               << config.image_height << "\n"
+               << static_cast<std::uint16_t>(255) << "\n";
 
-    const double step_r = (config.end_real - config.start_real) / config.image_width;
-    const double step_i = (config.end_imaginary - config.start_imaginary) / config.image_height;
+    const double step_r = (config.real_upper - config.real_lower) / config.image_width;
+    const double step_i = (config.imaginary_upper - config.imaginary_lower) / config.image_height;
 
-    double c_r = config.start_real;
-    double c_i = config.end_imaginary; // because we're gonna go top down!!
+    const std::size_t row_buffer_length = 3 * config.image_width;
+    auto row_buffer = std::vector<std::uint8_t>(row_buffer_length);
 
     const auto start = std::chrono::steady_clock::now();
 
     for (int row{0}; row < config.image_height; ++row)
     {
+        const double c_i = config.imaginary_upper - (row * step_i);
         for (int col{0}; col < config.image_width; ++col)
         {
+            const double c_r = config.real_lower + (col * step_r);
+
             // pixel colors
             std::uint8_t pixel_r = 0;
             std::uint8_t pixel_g = 0;
@@ -73,8 +80,6 @@ int main(int argc, char **argv)
                 z_r = (z_r * z_r) - (z_i * z_i) + c_r;
                 z_i = (2 * saved_z_r * z_i) + c_i;
 
-                // const auto x = ((z_r * z_r) + (z_i * z_i));
-                // std::cout << "[" << c_r << ", " << c_i << "] step #" << i << ": z = [" << z_r << ", " << z_i << "] --> |z| = " << x << "\n";
                 // exit condition check: |z| > 2.0?
                 if (((z_r * z_r) + (z_i * z_i)) > 4.0)
                 {
@@ -82,17 +87,17 @@ int main(int argc, char **argv)
                     pixel_r = static_cast<std::uint8_t>(255.0 * (d_ic - i) / d_ic);
                     pixel_g = static_cast<std::uint8_t>(255.0 * (d_ic - i) / d_ic);
                     pixel_b = static_cast<std::uint8_t>(255.0 * (d_ic - i) / d_ic);
+
                     break;
                 }
             }
 
-            image_file << std::format("{} {} {}  ", pixel_r, pixel_g, pixel_b);
-            c_r += step_r;
+            row_buffer[3 * col + 0] = pixel_r;
+            row_buffer[3 * col + 1] = pixel_g;
+            row_buffer[3 * col + 2] = pixel_b;
         }
 
-        image_file << "\n";
-        c_r = config.start_real;
-        c_i -= step_i; // progressing "downwards"
+        image_file.write(reinterpret_cast<const char *>(row_buffer.data()), static_cast<std::streamsize>(row_buffer_length));
     }
     auto end = std::chrono::steady_clock::now();
     std::chrono::duration<double> elapsed = end - start;
