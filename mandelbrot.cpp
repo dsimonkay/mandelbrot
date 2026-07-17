@@ -1,6 +1,10 @@
 #include "CLI11.hpp"
 
+#include <algorithm>
+#include <array>
+#include <cassert>
 #include <chrono>
+#include <cmath>
 #include <cstdint>
 #include <format>
 #include <iomanip>
@@ -19,7 +23,36 @@ struct Config
     std::uint16_t image_width{1600};
     std::uint16_t image_height{1600};
     std::uint16_t iteration_count{1000};
+    std::array<std::uint8_t, 3> start_color{0xFF, 0xFF, 0xFF}; // Color of a pixel escaping at the 1st iteration (R, G, B)
+    std::array<std::uint8_t, 3> end_color{0x01, 0x01, 0x01};   // Color of a pixel escaping at the <iteration_count>th iteration (R, G, B)
+    std::string output_file{"./mandelbrot.ppm"};
 };
+
+std::vector<std::array<std::uint8_t, 3U>> generate_palette(const Config &config)
+{
+    std::vector<std::array<std::uint8_t, 3U>> palette(config.iteration_count);
+
+    const float r_start = config.start_color[0];
+    const float g_start = config.start_color[1];
+    const float b_start = config.start_color[2];
+
+    const float target_value = std::sqrt(static_cast<float>(config.iteration_count));
+    const float r_diff = config.end_color[0] - r_start;
+    const float g_diff = config.end_color[1] - g_start;
+    const float b_diff = config.end_color[2] - b_start;
+
+    for (std::size_t i{0U}; i < config.iteration_count; ++i)
+    {
+        const float ratio = std::sqrt(static_cast<float>(i)) / target_value;
+        palette[i] = {
+            static_cast<std::uint8_t>(std::clamp(r_start + (r_diff * ratio), 0.0f, 255.0f)),
+            static_cast<std::uint8_t>(std::clamp(g_start + (g_diff * ratio), 0.0f, 255.0f)),
+            static_cast<std::uint8_t>(std::clamp(b_start + (b_diff * ratio), 0.0f, 255.0f)),
+        };
+    }
+
+    return palette;
+}
 
 int main(int argc, char **argv)
 {
@@ -33,14 +66,13 @@ int main(int argc, char **argv)
     app.add_option("--image_width", config.image_width, "Image width");
     app.add_option("--image_height", config.image_height, "Image height");
     app.add_option("--iteration_count", config.iteration_count, "Iteration_count");
-
+    app.add_option("-o, --output_file", config.output_file, "Output image file name");
     CLI11_PARSE(app, argc, argv);
 
-    const auto file_name{"./mandelbrot.ppm"};
-    auto image_file = std::ofstream{file_name, std::ios::binary};
+    auto image_file = std::ofstream{config.output_file, std::ios::binary};
     if (!image_file.is_open())
     {
-        std::cerr << " Error " << file_name << " could not be opened; exiting.\n";
+        std::cerr << " Error '" << config.output_file << "' could not be opened; exiting.\n";
         return 1;
     }
 
@@ -53,11 +85,10 @@ int main(int argc, char **argv)
     const double step_r = (config.real_upper - config.real_lower) / config.image_width;
     const double step_i = (config.imaginary_upper - config.imaginary_lower) / config.image_height;
 
-    const std::size_t row_buffer_length = 3 * config.image_width;
-    auto row_buffer = std::vector<std::uint8_t>(row_buffer_length);
+    auto row_buffer = std::vector<std::array<std::uint8_t, 3U>>(config.image_width);
+    const auto palette = generate_palette(config);
 
     const auto start = std::chrono::steady_clock::now();
-
     for (int row{0}; row < config.image_height; ++row)
     {
         const double c_i = config.imaginary_upper - (row * step_i);
@@ -66,13 +97,10 @@ int main(int argc, char **argv)
             const double c_r = config.real_lower + (col * step_r);
 
             // pixel colors
-            std::uint8_t pixel_r = 0;
-            std::uint8_t pixel_g = 0;
-            std::uint8_t pixel_b = 0;
+            std::array<std::uint8_t, 3U> pixel_color{};
 
             double z_r = 0.0;
             double z_i = 0.0;
-
             for (int i{0}; i < config.iteration_count; ++i)
             {
                 // z = z^2 + c
@@ -83,21 +111,15 @@ int main(int argc, char **argv)
                 // exit condition check: |z| > 2.0?
                 if (((z_r * z_r) + (z_i * z_i)) > 4.0)
                 {
-                    const auto d_ic = static_cast<double>(config.iteration_count);
-                    pixel_r = static_cast<std::uint8_t>(255.0 * (d_ic - i) / d_ic);
-                    pixel_g = static_cast<std::uint8_t>(255.0 * (d_ic - i) / d_ic);
-                    pixel_b = static_cast<std::uint8_t>(255.0 * (d_ic - i) / d_ic);
-
+                    pixel_color = palette[i];
                     break;
                 }
             }
 
-            row_buffer[3 * col + 0] = pixel_r;
-            row_buffer[3 * col + 1] = pixel_g;
-            row_buffer[3 * col + 2] = pixel_b;
+            row_buffer[col] = pixel_color;
         }
 
-        image_file.write(reinterpret_cast<const char *>(row_buffer.data()), static_cast<std::streamsize>(row_buffer_length));
+        image_file.write(reinterpret_cast<const char *>(row_buffer.data()), static_cast<std::streamsize>(3 * config.image_width));
     }
     auto end = std::chrono::steady_clock::now();
     std::chrono::duration<double> elapsed = end - start;
