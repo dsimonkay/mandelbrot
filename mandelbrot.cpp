@@ -28,6 +28,14 @@ struct Config
     std::string output_file{"./mandelbrot.ppm"};
 };
 
+/// @brief Generate a palette for the fractal generator. It creates a predefined palette
+///        that can be indexed by the iteration count at which a specific point (a complex number)
+///        escaped the iteration.
+///
+/// @note This is a non-overflowing palette; probably suboptimal for deeper zooming.
+///
+/// @param config The current configuration of the program
+/// @return the pregenerated palette
 std::vector<std::array<std::uint8_t, 3U>> generate_palette(const Config &config)
 {
     std::vector<std::array<std::uint8_t, 3U>> palette(config.iteration_count);
