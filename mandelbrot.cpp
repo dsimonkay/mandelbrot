@@ -33,7 +33,7 @@ struct Config
 ///        that can be indexed by the iteration count at which a specific point (a complex number)
 ///        escaped the iteration.
 ///
-/// @note This is a non-overflowing palette; probably suboptimal for deeper zooming.
+/// @note This is a overflowing palette.
 ///
 /// @param config The current configuration of the program
 /// @return the pregenerated palette
@@ -45,14 +45,13 @@ std::vector<std::array<std::uint8_t, 3U>> generate_palette(const Config &config)
     const float g_start = config.start_color[1];
     const float b_start = config.start_color[2];
 
-    const float target_value = std::sqrt(static_cast<float>(config.palette_size));
     const float r_diff = config.end_color[0] - r_start;
     const float g_diff = config.end_color[1] - g_start;
     const float b_diff = config.end_color[2] - b_start;
 
     for (std::size_t i{0U}; i < config.palette_size; ++i)
     {
-        const float ratio = std::sqrt(static_cast<float>(i)) / target_value;
+        const float ratio = static_cast<float>(i) / static_cast<float>(config.palette_size - 1);
         const float palindrom_ratio = 1 - std::abs(1 - (2 * ratio)); // creates a palindromic effect for the palette
         palette[i] = {
             static_cast<std::uint8_t>(std::clamp(r_start + (r_diff * palindrom_ratio), 0.0f, 255.0f)),
