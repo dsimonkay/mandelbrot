@@ -23,8 +23,9 @@ struct Config
     std::uint16_t image_width{1600};
     std::uint16_t image_height{1600};
     std::uint16_t iteration_count{1000};
-    std::array<std::uint8_t, 3> start_color{0xFF, 0xFF, 0xFF}; // Color of a pixel escaping at the 1st iteration (R, G, B)
-    std::array<std::uint8_t, 3> end_color{0x01, 0x01, 0x01};   // Color of a pixel escaping at the <iteration_count>th iteration (R, G, B)
+    std::uint16_t palette_size{256};
+    std::array<std::uint8_t, 3> start_color{0xFF, 0xFF, 0xFF}; ///< Color of a pixel escaping at the 1st iteration (R, G, B)
+    std::array<std::uint8_t, 3> end_color{0x01, 0x01, 0x01};   ///< Color of a pixel escaping at the <iteration_count>th iteration (R, G, B)
     std::string output_file{"./mandelbrot.ppm"};
 };
 
@@ -38,18 +39,18 @@ struct Config
 /// @return the pregenerated palette
 std::vector<std::array<std::uint8_t, 3U>> generate_palette(const Config &config)
 {
-    std::vector<std::array<std::uint8_t, 3U>> palette(config.iteration_count);
+    std::vector<std::array<std::uint8_t, 3U>> palette(config.palette_size);
 
     const float r_start = config.start_color[0];
     const float g_start = config.start_color[1];
     const float b_start = config.start_color[2];
 
-    const float target_value = std::sqrt(static_cast<float>(config.iteration_count));
+    const float target_value = std::sqrt(static_cast<float>(config.palette_size));
     const float r_diff = config.end_color[0] - r_start;
     const float g_diff = config.end_color[1] - g_start;
     const float b_diff = config.end_color[2] - b_start;
 
-    for (std::size_t i{0U}; i < config.iteration_count; ++i)
+    for (std::size_t i{0U}; i < config.palette_size; ++i)
     {
         const float ratio = std::sqrt(static_cast<float>(i)) / target_value;
         palette[i] = {
@@ -74,6 +75,7 @@ int main(int argc, char **argv)
     app.add_option("--image_width", config.image_width, "Image width");
     app.add_option("--image_height", config.image_height, "Image height");
     app.add_option("--iteration_count", config.iteration_count, "Iteration_count");
+    app.add_option("--palette_size", config.palette_size, "Number of colors in the palette");
     app.add_option("-o, --output_file", config.output_file, "Output image file name");
     CLI11_PARSE(app, argc, argv);
 
@@ -119,7 +121,7 @@ int main(int argc, char **argv)
                 // exit condition check: |z| > 2.0?
                 if (((z_r * z_r) + (z_i * z_i)) > 4.0)
                 {
-                    pixel_color = palette[i];
+                    pixel_color = palette[i % config.palette_size];
                     break;
                 }
             }
