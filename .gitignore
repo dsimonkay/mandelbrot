@@ -1,6 +1,7 @@
 # Generated image files
 *.ppm
 
-# The executable
+# The executables
 mandelbrot
+mandelbrot_gpu
 

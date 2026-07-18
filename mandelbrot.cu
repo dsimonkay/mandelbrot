@@ -13,6 +13,54 @@
 #include <string>
 #include <vector>
 
+#define CUDA_CHECK(call)                                               \
+    do                                                                 \
+    {                                                                  \
+        const cudaError_t err = (call);                                \
+        if (err != cudaSuccess)                                        \
+        {                                                              \
+            std::cerr << "CUDA error: " << cudaGetErrorString(err)     \
+                      << " (" << __FILE__ << ":" << __LINE__ << ")\n"; \
+            std::exit(1);                                              \
+        }                                                              \
+    } while (0)
+
+__global__ void mandelbrot_kernel(int *escape,
+                                  const int width, const int height,
+                                  const double real_lower, const double imaginary_upper,
+                                  const double step_r, const double step_i,
+                                  const int iteration_count)
+{
+    // "who am I?"
+    const int col = blockIdx.x * blockDim.x + threadIdx.x;
+    const int row = blockIdx.y * blockDim.y + threadIdx.y;
+    if ((col >= width) || (row >= height)) // sanity check
+    {
+        return;
+    }
+
+    const double c_r = real_lower + (col * step_r);
+    const double c_i = imaginary_upper - (row * step_i);
+
+    double z_r = 0.0;
+    double z_i = 0.0;
+
+    int e = iteration_count;
+    for (int i = 0; i < iteration_count; ++i)
+    {
+        const double saved_z_r = z_r;
+        z_r = (z_r * z_r) - (z_i * z_i) + c_r;
+        z_i = (2 * saved_z_r * z_i) + c_i;
+        if (((z_r * z_r) + (z_i * z_i)) > 4.0)
+        {
+            e = i;
+            break;
+        }
+    }
+
+    escape[row * width + col] = e;
+}
+
 /// @brief Configuration object for rendering a single Mandelbrot frame
 struct Config
 {
@@ -26,10 +74,11 @@ struct Config
     std::uint16_t palette_size{256};
     std::array<std::uint8_t, 3> start_color{0x1B, 0x2A, 0x6B}; ///< Color of a pixel escaping at the 1st iteration (R, G, B)
     std::array<std::uint8_t, 3> end_color{0xF5, 0xA6, 0x23};   ///< Color of a pixel escaping at the <iteration_count>th iteration (R, G, B)
-    std::string output_file{"./mandelbrot.ppm"};
+    std::string output_file{"./mandelbrot_cuda.ppm"};
 };
 
 /// @brief Generate a palette for the fractal generator.
+///
 /// @note This is an overflowing palette.
 ///
 /// @param config The current configuration of the program
@@ -94,38 +143,39 @@ int main(int argc, char **argv)
     const double step_r = (config.real_upper - config.real_lower) / config.image_width;
     const double step_i = (config.imaginary_upper - config.imaginary_lower) / config.image_height;
 
+    // -------------------- Let the GPU compute the escape numbers
+    const auto pixel_count = std::size_t{config.image_width} * config.image_height;
+    int *d_escape = nullptr;
+    CUDA_CHECK(cudaMalloc(&d_escape, pixel_count * sizeof(int)));
+
+    const dim3 block(16, 16); // 256 threads / block
+    const dim3 grid((config.image_width + block.x - 1) / block.x,
+                    (config.image_height + block.y - 1) / block.y);
+    mandelbrot_kernel<<<grid, block>>>(d_escape, config.image_width, config.image_height,
+                                       config.real_lower, config.imaginary_upper,
+                                       step_r, step_i, config.iteration_count);
+    CUDA_CHECK(cudaGetLastError());
+    CUDA_CHECK(cudaDeviceSynchronize());
+
+    std::vector<int> escape(pixel_count);
+    CUDA_CHECK(cudaMemcpy(escape.data(), d_escape, pixel_count * sizeof(int),
+                          cudaMemcpyDeviceToHost));
+    CUDA_CHECK(cudaFree(d_escape));
+    // ------------------------------------------------------
+
     auto row_buffer = std::vector<std::array<std::uint8_t, 3U>>(config.image_width);
     const auto palette = generate_palette(config);
 
     const auto start = std::chrono::steady_clock::now();
-    for (int row{0}; row < config.image_height; ++row)
+    for (int row = 0; row < config.image_height; ++row)
     {
-        const double c_i = config.imaginary_upper - (row * step_i);
-        for (int col{0}; col < config.image_width; ++col)
+        for (int col = 0; col < config.image_width; ++col)
         {
-            const double c_r = config.real_lower + (col * step_r);
-
-            // pixel colors
-            std::array<std::uint8_t, 3U> pixel_color{};
-
-            double z_r = 0.0;
-            double z_i = 0.0;
-            for (int i{0}; i < config.iteration_count; ++i)
-            {
-                // z = z^2 + c
-                const double saved_z_r = z_r;
-                z_r = (z_r * z_r) - (z_i * z_i) + c_r;
-                z_i = (2 * saved_z_r * z_i) + c_i;
-
-                // exit condition check: |z| > 2.0?
-                if (((z_r * z_r) + (z_i * z_i)) > 4.0)
-                {
-                    pixel_color = palette[i % config.palette_size];
-                    break;
-                }
-            }
-
-            row_buffer[col] = pixel_color;
+            // new: instead of the Z-iteration
+            const int e = escape[static_cast<std::size_t>(row) * config.image_width + col];
+            row_buffer[col] = (e >= config.iteration_count)
+                                  ? std::array<std::uint8_t, 3U>{}
+                                  : palette[e % config.palette_size];
         }
 
         image_file.write(reinterpret_cast<const char *>(row_buffer.data()), static_cast<std::streamsize>(3 * config.image_width));
@@ -133,8 +183,8 @@ int main(int argc, char **argv)
     auto end = std::chrono::steady_clock::now();
     std::chrono::duration<double> elapsed = end - start;
     std::chrono::duration<double> wall_elapsed = end - wall_start;
-    std::cout << "Wall time: " << std::fixed << std::setprecision(9) << wall_elapsed.count() << " seconds   \n"
-              << "Core loop: " << elapsed.count() << " seconds\n";
+    std::cout << "       Wall time: " << std::fixed << std::setprecision(9) << wall_elapsed.count() << " seconds   \n"
+              << "Coloring + write: " << elapsed.count() << " seconds\n";
 
     image_file.close();
 
