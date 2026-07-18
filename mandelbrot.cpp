@@ -53,10 +53,11 @@ std::vector<std::array<std::uint8_t, 3U>> generate_palette(const Config &config)
     for (std::size_t i{0U}; i < config.palette_size; ++i)
     {
         const float ratio = std::sqrt(static_cast<float>(i)) / target_value;
+        const float palindrom_ratio = 1 - std::abs(1 - (2 * ratio)); // creates a palindromic effect for the palette
         palette[i] = {
-            static_cast<std::uint8_t>(std::clamp(r_start + (r_diff * ratio), 0.0f, 255.0f)),
-            static_cast<std::uint8_t>(std::clamp(g_start + (g_diff * ratio), 0.0f, 255.0f)),
-            static_cast<std::uint8_t>(std::clamp(b_start + (b_diff * ratio), 0.0f, 255.0f)),
+            static_cast<std::uint8_t>(std::clamp(r_start + (r_diff * palindrom_ratio), 0.0f, 255.0f)),
+            static_cast<std::uint8_t>(std::clamp(g_start + (g_diff * palindrom_ratio), 0.0f, 255.0f)),
+            static_cast<std::uint8_t>(std::clamp(b_start + (b_diff * palindrom_ratio), 0.0f, 255.0f)),
         };
     }
 
