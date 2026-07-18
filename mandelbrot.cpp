@@ -24,8 +24,8 @@ struct Config
     std::uint16_t image_height{1600};
     std::uint16_t iteration_count{1000};
     std::uint16_t palette_size{256};
-    std::array<std::uint8_t, 3> start_color{0xFF, 0xFF, 0xFF}; ///< Color of a pixel escaping at the 1st iteration (R, G, B)
-    std::array<std::uint8_t, 3> end_color{0x01, 0x01, 0x01};   ///< Color of a pixel escaping at the <iteration_count>th iteration (R, G, B)
+    std::array<std::uint8_t, 3> start_color{0x1B, 0x2A, 0x6B}; ///< Color of a pixel escaping at the 1st iteration (R, G, B)
+    std::array<std::uint8_t, 3> end_color{0xF5, 0xA6, 0x23};   ///< Color of a pixel escaping at the <iteration_count>th iteration (R, G, B)
     std::string output_file{"./mandelbrot.ppm"};
 };
 
@@ -33,7 +33,7 @@ struct Config
 ///        that can be indexed by the iteration count at which a specific point (a complex number)
 ///        escaped the iteration.
 ///
-/// @note This is a overflowing palette.
+/// @note This is an overflowing palette.
 ///
 /// @param config The current configuration of the program
 /// @return the pregenerated palette
