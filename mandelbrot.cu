@@ -2,15 +2,14 @@
 
 #include <algorithm>
 #include <array>
-#include <cassert>
 #include <chrono>
 #include <cmath>
 #include <cstdint>
-#include <format>
+#include <fstream>
 #include <iomanip>
 #include <iostream>
-#include <fstream>
 #include <string>
+#include <utility>
 #include <vector>
 
 #define CUDA_CHECK(call)                                               \
@@ -24,6 +23,52 @@
             std::exit(1);                                              \
         }                                                              \
     } while (0)
+
+/// @brief Named stopwatch collection: measures labelled code blocks and
+///        prints a summary report (seconds + percentage of total wall time).
+class TimingReport
+{
+public:
+    using clock_type = std::chrono::steady_clock;
+
+    /// @brief Run the given callable and record its runtime under @p label.
+    template <typename F>
+    void measure(const std::string &label, F &&callable)
+    {
+        const auto t0 = clock_type::now();
+        std::forward<F>(callable)();
+        const auto t1 = clock_type::now();
+        entries_.emplace_back(label, std::chrono::duration<double>(t1 - t0).count());
+    }
+
+    /// @brief Print all measured blocks, the unmeasured remainder and the total.
+    void print(const double wall_seconds) const
+    {
+        double measured_sum = 0.0;
+        std::cout << "\n---- timing report ---------------------------------------------\n";
+        for (const auto &[label, seconds] : entries_)
+        {
+            print_line(label, seconds, wall_seconds);
+            measured_sum += seconds;
+        }
+        print_line("(everything else: CLI parse, file open, ...)",
+                   wall_seconds - measured_sum, wall_seconds);
+        std::cout << "----------------------------------------------------------------\n";
+        print_line("TOTAL wall time", wall_seconds, wall_seconds);
+    }
+
+private:
+    static void print_line(const std::string &label, const double seconds, const double wall_seconds)
+    {
+        std::cout << std::left << std::setw(46) << label
+                  << std::right << std::fixed
+                  << std::setw(11) << std::setprecision(6) << seconds << " s"
+                  << std::setw(7) << std::setprecision(1)
+                  << (100.0 * seconds / wall_seconds) << " %\n";
+    }
+
+    std::vector<std::pair<std::string, double>> entries_;
+};
 
 __global__ void mandelbrot_kernel(int *escape,
                                   const int width, const int height,
@@ -111,7 +156,8 @@ std::vector<std::array<std::uint8_t, 3U>> generate_palette(const Config &config)
 
 int main(int argc, char **argv)
 {
-    const auto wall_start = std::chrono::steady_clock::now();
+    const auto wall_start = TimingReport::clock_type::now();
+    TimingReport timing{};
 
     Config config{};
 
@@ -126,6 +172,12 @@ int main(int argc, char **argv)
     app.add_option("--palette_size", config.palette_size, "Number of colors in the palette");
     app.add_option("-o, --output_file", config.output_file, "Output image file name");
     CLI11_PARSE(app, argc, argv);
+
+    // The very first CUDA call wakes up the GPU and builds the CUDA context.
+    // This is a one-time "entry ticket"; we pay it here explicitly, on its own
+    // stopwatch, so every later measurement shows pure work.
+    timing.measure("CUDA init (context + wake-up)", []
+                   { CUDA_CHECK(cudaFree(nullptr)); });
 
     auto image_file = std::ofstream{config.output_file, std::ios::binary};
     if (!image_file.is_open())
@@ -146,47 +198,55 @@ int main(int argc, char **argv)
     // -------------------- Let the GPU compute the escape numbers
     const auto pixel_count = std::size_t{config.image_width} * config.image_height;
     int *d_escape = nullptr;
-    CUDA_CHECK(cudaMalloc(&d_escape, pixel_count * sizeof(int)));
+    timing.measure("GPU alloc (cudaMalloc)", [&]
+                   { CUDA_CHECK(cudaMalloc(&d_escape, pixel_count * sizeof(int))); });
 
     const dim3 block(16, 16); // 256 threads / block
     const dim3 grid((config.image_width + block.x - 1) / block.x,
                     (config.image_height + block.y - 1) / block.y);
-    mandelbrot_kernel<<<grid, block>>>(d_escape, config.image_width, config.image_height,
-                                       config.real_lower, config.imaginary_upper,
-                                       step_r, step_i, config.iteration_count);
-    CUDA_CHECK(cudaGetLastError());
-    CUDA_CHECK(cudaDeviceSynchronize());
+
+    timing.measure("GPU compute (kernel)", [&]
+                   {
+                       mandelbrot_kernel<<<grid, block>>>(d_escape, config.image_width, config.image_height,
+                                                          config.real_lower, config.imaginary_upper,
+                                                          step_r, step_i, config.iteration_count);
+                       CUDA_CHECK(cudaGetLastError());
+                       CUDA_CHECK(cudaDeviceSynchronize());
+                   });
 
     std::vector<int> escape(pixel_count);
-    CUDA_CHECK(cudaMemcpy(escape.data(), d_escape, pixel_count * sizeof(int),
-                          cudaMemcpyDeviceToHost));
+    timing.measure("copy device -> host (cudaMemcpy)", [&]
+                   { CUDA_CHECK(cudaMemcpy(escape.data(), d_escape, pixel_count * sizeof(int),
+                                           cudaMemcpyDeviceToHost)); });
     CUDA_CHECK(cudaFree(d_escape));
     // ------------------------------------------------------
 
     auto row_buffer = std::vector<std::array<std::uint8_t, 3U>>(config.image_width);
     const auto palette = generate_palette(config);
 
-    const auto start = std::chrono::steady_clock::now();
-    for (int row = 0; row < config.image_height; ++row)
-    {
-        for (int col = 0; col < config.image_width; ++col)
-        {
-            // new: instead of the Z-iteration
-            const int e = escape[static_cast<std::size_t>(row) * config.image_width + col];
-            row_buffer[col] = (e >= config.iteration_count)
-                                  ? std::array<std::uint8_t, 3U>{}
-                                  : palette[e % config.palette_size];
-        }
+    timing.measure("coloring + PPM write", [&]
+                   {
+                       for (int row = 0; row < config.image_height; ++row)
+                       {
+                           for (int col = 0; col < config.image_width; ++col)
+                           {
+                               // instead of the Z-iteration: read the precomputed escape count
+                               const int e = escape[static_cast<std::size_t>(row) * config.image_width + col];
+                               row_buffer[col] = (e >= config.iteration_count)
+                                                     ? std::array<std::uint8_t, 3U>{}
+                                                     : palette[e % config.palette_size];
+                           }
 
-        image_file.write(reinterpret_cast<const char *>(row_buffer.data()), static_cast<std::streamsize>(3 * config.image_width));
-    }
-    auto end = std::chrono::steady_clock::now();
-    std::chrono::duration<double> elapsed = end - start;
-    std::chrono::duration<double> wall_elapsed = end - wall_start;
-    std::cout << "       Wall time: " << std::fixed << std::setprecision(9) << wall_elapsed.count() << " seconds   \n"
-              << "Coloring + write: " << elapsed.count() << " seconds\n";
+                           image_file.write(reinterpret_cast<const char *>(row_buffer.data()),
+                                            static_cast<std::streamsize>(3 * config.image_width));
+                       }
+                   });
 
     image_file.close();
+
+    const double wall_seconds =
+        std::chrono::duration<double>(TimingReport::clock_type::now() - wall_start).count();
+    timing.print(wall_seconds);
 
     return 0;
 }
