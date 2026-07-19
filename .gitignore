@@ -1,3 +1,6 @@
+# Build artifacts
+*.o
+
 # Generated image files
 *.ppm
 
