@@ -35,12 +35,11 @@ Config get_config(int argc, char **argv)
     Config config{};
 
     CLI::App app{"Simple Mandelbrot fractal generator"};
-    app.add_option("--real_lower", config.real_lower, "Range start on the real axis");
-    app.add_option("--real_upper", config.real_upper, "Range end on the real axis");
-    app.add_option("--imaginary_lower", config.imaginary_lower, "Range start on the imaginary axis");
-    app.add_option("--imaginary_upper", config.imaginary_upper, "Range end on the imaginary axis");
-    app.add_option("--image_width", config.image_width, "Image width");
-    app.add_option("--image_height", config.image_height, "Image height");
+    app.add_option("--real_center", config.real_center, "Viewport center on the real axis");
+    app.add_option("--imaginary_center", config.imaginary_center, "Viewport center on the imaginary axis");
+    app.add_option("--viewport_width", config.viewport_width, "Viewport width on the real axis");
+    app.add_option("--viewport_height", config.viewport_height, "Viewport height on the real axis");
+    app.add_option("--image_width", config.image_width, "Image width (height will be calculated automatically)");
     app.add_option("--iteration_count", config.iteration_count, "Iteration_count");
     app.add_option("--palette_size", config.palette_size, "Number of colors in the palette");
     app.add_option("--output_path", config.output_path, "Path for output images");
@@ -56,6 +55,15 @@ Config get_config(int argc, char **argv)
     }
 
     return config;
+}
+
+void set_viewport_details(Config &config)
+{
+    config.viewport_left = config.real_center - (config.viewport_width / 2.0);
+    config.viewport_top = config.imaginary_center + (config.viewport_height / 2.0);
+
+    config.step = config.viewport_width / config.image_width;
+    config.image_height = static_cast<decltype(config.image_height)>(config.viewport_height / config.step);
 }
 
 void TimingReport::print(const double wall_seconds) const

@@ -12,16 +12,22 @@
 /// @brief Configuration object for rendering a single Mandelbrot frame
 struct Config
 {
-    double real_lower{-2.5};       ///< Range start on the real axis
-    double real_upper{1.0};        ///< Range end on the real axis
-    double imaginary_lower{-1.75}; ///< Range start on the imaginary axis
-    double imaginary_upper{1.75};  ///< Range end on the imaginary axis
+    double real_center{-0.75};    ///< Viewport center on the real axis
+    double imaginary_center{0.0}; ///< Viewport center on the imaginary axis
+    double viewport_width{3.5};   ///< Viewport width on the real axis
+    double viewport_height{3.5};  ///< Viewport height on the imaginary axis
+    double viewport_left{};       ///< Real coordinate of the left edge of viewport window (will be calculated)
+    double viewport_top{};        ///< Imaginary coordinate of the top edge of viewport window (will be calculated)
+    double step{};                ///< Uniform step size on each axis
+
     std::uint16_t image_width{1600};
-    std::uint16_t image_height{1600};
+    std::uint16_t image_height{}; // Will be calculated; cannot be set directly
+
     std::uint16_t iteration_count{1000};
     std::uint16_t palette_size{256};
     std::array<std::uint8_t, 3> start_color{0x1B, 0x2A, 0x6B}; ///< Color of a pixel escaping at the 1st iteration (R, G, B)
     std::array<std::uint8_t, 3> end_color{0xF5, 0xA6, 0x23};   ///< Color of a pixel escaping at the <iteration_count>th iteration (R, G, B)
+
     std::string output_path{"."};
     std::string output_file{"mandelbrot"};
 };
@@ -31,6 +37,14 @@ struct Config
 /// @param argv array of null-terminated argument strings
 /// @return the collected configuration struct
 Config get_config(int argc, char **argv);
+
+/// @brief Set the details of the viewport to be rendered in the provided configuration:
+///          - viewport left
+///          - viewport top
+///          - step
+///          - image height
+/// @param config The currently active configuration
+void set_viewport_details(Config &config);
 
 /// @brief Generate a palette for the fractal generator.
 /// @note This is an overflowing palette.

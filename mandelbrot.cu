@@ -24,8 +24,8 @@
 
 __global__ void mandelbrot_kernel(int *escape,
                                   const int width, const int height,
-                                  const double real_lower, const double imaginary_upper,
-                                  const double step_r, const double step_i,
+                                  const double viewport_left, const double imaginary_upper,
+                                  const double step,
                                   const int iteration_count)
 {
     // "who am I?"
@@ -36,8 +36,8 @@ __global__ void mandelbrot_kernel(int *escape,
         return;
     }
 
-    const double c_r = real_lower + (col * step_r);
-    const double c_i = imaginary_upper - (row * step_i);
+    const double c_r = viewport_left + (col * step);
+    const double c_i = imaginary_upper - (row * step);
 
     double z_r = 0.0;
     double z_i = 0.0;
@@ -63,7 +63,8 @@ int main(int argc, char **argv)
     const auto wall_start = TimingReport::clock_type::now();
     TimingReport timing{};
 
-    const auto config = get_config(argc, argv);
+    auto config = get_config(argc, argv);
+    set_viewport_details(config);
 
     // The very first CUDA call wakes up the GPU and builds the CUDA context.
     // This is a one-time "entry ticket"; we pay it here explicitly, on its own
@@ -85,9 +86,6 @@ int main(int argc, char **argv)
                << config.image_height << "\n"
                << static_cast<std::uint16_t>(255) << "\n";
 
-    const double step_r = (config.real_upper - config.real_lower) / config.image_width;
-    const double step_i = (config.imaginary_upper - config.imaginary_lower) / config.image_height;
-
     // -------------------- Let the GPU compute the escape numbers
     const auto pixel_count = std::size_t{config.image_width} * config.image_height;
     int *d_escape = nullptr;
@@ -101,8 +99,8 @@ int main(int argc, char **argv)
     timing.measure("GPU compute (kernel)", [&]
                    {
                        mandelbrot_kernel<<<grid, block>>>(d_escape, config.image_width, config.image_height,
-                                                          config.real_lower, config.imaginary_upper,
-                                                          step_r, step_i, config.iteration_count);
+                                                          config.viewport_left, config.viewport_top,
+                                                          config.step, config.iteration_count);
                        CUDA_CHECK(cudaGetLastError());
                        CUDA_CHECK(cudaDeviceSynchronize()); });
 

@@ -14,7 +14,8 @@ int main(int argc, char **argv)
     const auto wall_start = TimingReport::clock_type::now();
     TimingReport timing{};
 
-    const auto config = get_config(argc, argv);
+    auto config = get_config(argc, argv);
+    set_viewport_details(config);
 
     // Create binary image file
     const auto filename = config.output_path + "/" + config.output_file + ".ppm";
@@ -29,19 +30,16 @@ int main(int argc, char **argv)
                << config.image_height << "\n"
                << static_cast<std::uint16_t>(255) << "\n";
 
-    const double step_r = (config.real_upper - config.real_lower) / config.image_width;
-    const double step_i = (config.imaginary_upper - config.imaginary_lower) / config.image_height;
-
     auto row_buffer = std::vector<std::array<std::uint8_t, 3U>>(config.image_width);
     const auto palette = generate_palette(config);
 
     timing.measure("CPU compute + PPM write", [&]
                    {    for (int row{0}; row < config.image_height; ++row)
     {
-        const double c_i = config.imaginary_upper - (row * step_i);
+        const double c_i = config.viewport_top - (row * config.step);
         for (int col{0}; col < config.image_width; ++col)
         {
-            const double c_r = config.real_lower + (col * step_r);
+            const double c_r = config.viewport_left + (col * config.step);
 
             // pixel colors
             std::array<std::uint8_t, 3U> pixel_color{};
