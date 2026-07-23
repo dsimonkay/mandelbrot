@@ -33,10 +33,10 @@ Default output is `./mandelbrot.ppm`.
 
 ## Examples
 
-1. Running `./mandelbrot` yields:
+1. Running `./mandelbrot --image_width=800` yields:
 
-![Mandelbrot default view](./mandelbrot1_800x800.jpg)
+![Mandelbrot default view](./mandelbrot1.jpg)
 
-2. Running `/mandelbrot --real_center=-0.7488 --imaginary_center=0.1 --viewport_width=0.001 --viewport_height=0.001` yields:
+2. Running `/mandelbrot --real_center=-0.7488 --imaginary_center=0.1 --viewport_width=0.001 --viewport_height=0.001 --image_width=800` yields:
 
-![Mandelbrot zoomed view](./mandelbrot2_800x800.jpg)
+![Mandelbrot zoomed view](./mandelbrot2.jpg)
